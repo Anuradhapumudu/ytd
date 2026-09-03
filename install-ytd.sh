@@ -248,53 +248,55 @@ function youtube() {
   local _WHITE='\033[97m' _GRAY='\033[90m'
 
   # ── Progress Bar Renderer ──
-  # Reads yt-dlp --newline output from stdin and renders a visual progress bar
+  # Single-line. No \n ever. Pure string ops — no grep/sed subprocesses.
+  # All locals declared at top to prevent zsh variable-leak in pipe subshells.
   _ytd_progress() {
-    local bar_w=35 last_pct=-1
-    while IFS= read -r line; do
-      case "$line" in
-        "[download]"*"% of"*)
-          local pct_raw
-          pct_raw=$(echo "$line" | grep -oE '[0-9]+\.[0-9]+' | head -1)
-          local pct=${pct_raw%%.*}
-          if [[ -n "$pct" && "$pct" =~ ^[0-9]+$ && "$pct" -ne "$last_pct" ]]; then
-            last_pct=$pct
-            local size speed eta
-            size=$(echo "$line" | sed -n 's/.*of ~\{0,1\} *\([0-9.]*[A-Za-z]*\).*/\1/p')
-            speed=$(echo "$line" | sed -n 's/.*at  *\([0-9.]*[A-Za-z/]*\).*/\1/p')
-            eta=$(echo "$line" | sed -n 's/.*ETA \([0-9:]*\).*/\1/p')
-            local filled=$((pct * bar_w / 100))
-            local empty=$((bar_w - filled))
-            local bar="" i
-            for ((i=0; i<filled; i++)); do bar+="█"; done
-            for ((i=0; i<empty; i++)); do bar+="░"; done
-            printf '\r  \033[32m%s\033[0m \033[1m%3d%%\033[0m  \033[90m%s  %s  ETA %s\033[0m    ' \
-              "$bar" "$pct" "${size:-...}" "${speed:-...}" "${eta:-...}"
+    local _bw=35 _last=-1
+    local _ln _tmp _pct _f _e _bar _j _sz _sp _et
+    while IFS= read -r _ln; do
+      case "$_ln" in
+        "[download]"*"%"*)
+          _tmp="${_ln#*\] }"
+          _tmp="${_tmp# }"
+          _tmp="${_tmp%%\%*}"
+          _tmp="${_tmp##* }"
+          _pct="${_tmp%%.*}"
+          _pct="${_pct// /}"
+          if [[ "$_pct" =~ ^[0-9]+$ ]] && [[ "$_pct" != "$_last" ]]; then
+            _last=$_pct
+            _f=$((_pct * _bw / 100))
+            _e=$((_bw - _f))
+            _bar=""
+            _j=0; while [[ $_j -lt $_f ]]; do _bar="${_bar}█"; _j=$((_j + 1)); done
+            _j=0; while [[ $_j -lt $_e ]]; do _bar="${_bar}░"; _j=$((_j + 1)); done
+            if [[ $_pct -ge 100 ]]; then
+              printf '\r\033[K  \033[32m%s\033[0m \033[1m100%%\033[0m  \033[90mComplete\033[0m' "$_bar"
+            else
+              _sz="..."; _sp="..."; _et="..."
+              case "$_ln" in *" of "*) _tmp="${_ln#* of }"; _tmp="${_tmp#\~ }"; _tmp="${_tmp# }"; _sz="${_tmp%% *}";; esac
+              case "$_ln" in *" at "*) _tmp="${_ln#* at }"; _tmp="${_tmp# }"; _sp="${_tmp%% *}";; esac
+              case "$_ln" in *"ETA "*) _tmp="${_ln#*ETA }"; _et="${_tmp%% *}";; esac
+              printf '\r\033[K  \033[32m%s\033[0m \033[1m%3d%%\033[0m  \033[90m%s  %s  ETA %s\033[0m' \
+                "$_bar" "$_pct" "$_sz" "$_sp" "$_et"
+            fi
           fi
           ;;
-        "[download] 100%"*|"[download] 100.0%"*)
-          local bar="" i
-          for ((i=0; i<bar_w; i++)); do bar+="█"; done
-          printf '\r  \033[32m%s\033[0m \033[1m100%%\033[0m  \033[90mComplete\033[0m                        \n' "$bar"
-          ;;
         "[Merger]"*)
-          printf '\r\033[K  \033[36m⟳\033[0m  Merging video + audio...\n'
+          printf '\r\033[K  \033[36m⟳\033[0m  Merging video + audio...'
           ;;
         "[ExtractAudio]"*)
-          printf '\r\033[K  \033[35m♫\033[0m  Extracting audio...\n'
+          printf '\r\033[K  \033[35m♫\033[0m  Extracting audio...'
           ;;
-        "[download] Downloading video"*|"[download] Downloading item"*)
-          # Playlist per-video indicator
-          local item_info
-          item_info=$(echo "$line" | sed 's/\[download\] //')
-          printf '\r\033[K  \033[36m▶\033[0m  %s\n' "$item_info"
+        "[download] Downloading"*)
+          _tmp="${_ln#\[download\] }"
+          printf '\r\033[K  \033[36m▶\033[0m  %s' "$_tmp"
+          _last=-1
           ;;
         "[download] Destination:"*)
+          _last=-1
           ;;
-        "[download]"*"has already been downloaded"*)
-          printf '\r\033[K  \033[90m⏭  Already downloaded, skipping\033[0m\n'
-          ;;
-        *)
+        "[download]"*"already been downloaded"*)
+          printf '\r\033[K  \033[90m⏭  Skipping (already downloaded)\033[0m'
           ;;
       esac
     done
