@@ -1,257 +1,271 @@
 #!/usr/bin/env bash
-
 # ─────────────────────────────────────────────────────────────────────────────
-# YouTube Downloader — Interactive CLI Installer
-# Installs yt-dlp, ffmpeg, fzf, and injects the `youtube` shell function
-# into your ~/.zshrc or ~/.bashrc.
+# YouTube Downloader — Interactive CLI Installer  v2.3
+# Installs yt-dlp, ffmpeg, fzf and injects the `youtube` shell function.
 #
-# Supports: macOS (Homebrew), Linux (apt/dnf/yum/pacman/zypper/apk/snap/brew),
-#           Windows (winget/scoop/choco via Git Bash/MSYS2/WSL).
+# Supports: macOS · Linux · WSL · Windows (Git Bash / MSYS2)
+#
+# Usage:
+#   bash <(curl -fsSL https://raw.githubusercontent.com/Anuradhapumudu/ytd/main/install-ytd.sh)
 # ─────────────────────────────────────────────────────────────────────────────
 
-set -e
+# ── Safety: do NOT use set -e — it causes silent failures on Windows/WSL ──
+# We handle errors explicitly instead.
 
-# ── Colors ────────────────────────────────────────────────────────────────────
+# ── Portable printf-based helpers (echo -e is not portable) ──────────────────
 BOLD='\033[1m'
 DIM='\033[2m'
-BLUE='\033[34m'
 CYAN='\033[36m'
 GREEN='\033[32m'
 YELLOW='\033[33m'
 RED='\033[31m'
 MAGENTA='\033[35m'
+BLUE='\033[34m'
 RESET='\033[0m'
 
+p()       { printf '%b\n' "$*"; }
+info()    { printf '  \033[34mINFO\033[0m  %b\n' "$1"; }
+success() { printf '  \033[32m OK \033[0m  %b\n' "$1"; }
+warn()    { printf '  \033[33mWARN\033[0m  %b\n' "$1"; }
+fail()    { printf '  \033[31mFAIL\033[0m  %b\n' "$1"; }
+
 # ── Banner ────────────────────────────────────────────────────────────────────
-echo ""
-echo -e "${CYAN}${BOLD}  ╔═══════════════════════════════════════════════════╗${RESET}"
-echo -e "${CYAN}${BOLD}  ║            ${MAGENTA}▶  YouTube Downloader  ◀${CYAN}              ║${RESET}"
-echo -e "${CYAN}${BOLD}  ║         ${DIM}${CYAN}Interactive CLI  •  v2.0${RESET}${CYAN}${BOLD}                ║${RESET}"
-echo -e "${CYAN}${BOLD}  ╚═══════════════════════════════════════════════════╝${RESET}"
-echo ""
+p ""
+p "${CYAN}${BOLD}  =============================================${RESET}"
+p "${CYAN}${BOLD}       YouTube Downloader  CLI  v2.3${RESET}"
+p "${CYAN}${BOLD}  =============================================${RESET}"
+p ""
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
-command_exists() {
-  command -v "$1" >/dev/null 2>&1
-}
-
-info()    { echo -e "  ${BLUE}ℹ${RESET}  $1"; }
-success() { echo -e "  ${GREEN}✔${RESET}  $1"; }
-warn()    { echo -e "  ${YELLOW}⚠${RESET}  $1"; }
-fail()    { echo -e "  ${RED}✖${RESET}  $1"; }
-
-# ── Detect OS ─────────────────────────────────────────────────────────────────
-detect_os() {
-  if [[ "$OSTYPE" == darwin* ]]; then
-    echo "mac"
-  elif [[ "$OSTYPE" == linux* ]]; then
-    echo "linux"
-  elif [[ "$OSTYPE" == msys* || "$OSTYPE" == cygwin* || "$OSTYPE" == win32* || "${OS:-}" == "Windows_NT" ]]; then
-    echo "windows"
-  else
-    echo "unknown"
+# ── Detect environment ────────────────────────────────────────────────────────
+detect_env() {
+  # WSL must be checked before generic linux
+  if [[ -n "${WSL_DISTRO_NAME:-}" ]] || grep -qi microsoft /proc/version 2>/dev/null; then
+    echo "wsl"
+    return
   fi
+  case "${OSTYPE:-}" in
+    darwin*)             echo "mac" ;;
+    msys*|cygwin*|win*) echo "windows" ;;
+    linux*)              echo "linux" ;;
+    *)
+      # Last resort: check uname
+      case "$(uname -s 2>/dev/null)" in
+        Darwin)  echo "mac" ;;
+        Linux)   echo "linux" ;;
+        MINGW*|MSYS*|CYGWIN*) echo "windows" ;;
+        *)       echo "unknown" ;;
+      esac
+      ;;
+  esac
 }
 
-# ── Detect Shell RC File ─────────────────────────────────────────────────────
-detect_rc_file() {
-  local current_shell
-  current_shell="$(basename "${SHELL:-/bin/bash}")"
+ENV="$(detect_env)"
+info "Detected environment: ${BOLD}${ENV}${RESET}"
+p ""
 
-  if [[ "$current_shell" == "zsh" ]]; then
-    echo "$HOME/.zshrc"
-  elif [[ "$current_shell" == "bash" ]]; then
-    echo "$HOME/.bashrc"
-  else
-    # Fallback: check if .zshrc exists, otherwise .bashrc
-    if [[ -f "$HOME/.zshrc" ]]; then
-      echo "$HOME/.zshrc"
-    else
-      echo "$HOME/.bashrc"
-    fi
-  fi
+# ── Detect RC file ────────────────────────────────────────────────────────────
+detect_rc() {
+  local sh
+  sh="$(basename "${SHELL:-bash}" 2>/dev/null || echo bash)"
+  case "$sh" in
+    zsh)  echo "${HOME}/.zshrc" ;;
+    fish) echo "${HOME}/.config/fish/config.fish" ;;
+    *)
+      # On WSL/Windows bash is typical; prefer .bashrc
+      if [[ -f "${HOME}/.bashrc" ]]; then
+        echo "${HOME}/.bashrc"
+      elif [[ -f "${HOME}/.zshrc" ]]; then
+        echo "${HOME}/.zshrc"
+      else
+        echo "${HOME}/.bashrc"
+      fi
+      ;;
+  esac
 }
 
-# ── Package Installers ───────────────────────────────────────────────────────
+RC_FILE="$(detect_rc)"
+
+# ── command_exists helper ─────────────────────────────────────────────────────
+command_exists() { command -v "$1" >/dev/null 2>&1; }
+
+# ── yt-dlp special: can also be a Python package ─────────────────────────────
+ytdlp_exists() {
+  command_exists yt-dlp && return 0
+  python3 -m yt_dlp --version >/dev/null 2>&1 && return 0
+  return 1
+}
+
+# ── Install helpers per platform ──────────────────────────────────────────────
 install_mac() {
-  local package="$1"
+  local pkg="$1"
   if command_exists brew; then
-    brew install "$package"
+    brew install "$pkg" 2>&1 | tail -3
   else
-    fail "Homebrew is required on macOS but was not found."
-    echo -e "     Install it first: ${CYAN}https://brew.sh${RESET}"
-    exit 1
+    fail "Homebrew not found. Install it from ${CYAN}https://brew.sh${RESET}"
+    return 1
   fi
 }
 
 install_linux() {
-  local package="$1"
-
+  local pkg="$1"
   if command_exists apt-get; then
-    sudo apt-get update -qq && sudo apt-get install -y "$package"
-    return 0
+    sudo apt-get update -qq 2>/dev/null && sudo apt-get install -y "$pkg" 2>&1 | tail -3
+  elif command_exists dnf; then
+    sudo dnf install -y "$pkg" 2>&1 | tail -3
+  elif command_exists yum; then
+    sudo yum install -y "$pkg" 2>&1 | tail -3
+  elif command_exists pacman; then
+    sudo pacman -Sy --noconfirm "$pkg" 2>&1 | tail -3
+  elif command_exists zypper; then
+    sudo zypper --non-interactive install "$pkg" 2>&1 | tail -3
+  elif command_exists apk; then
+    sudo apk add "$pkg" 2>&1 | tail -3
+  elif command_exists brew; then
+    brew install "$pkg" 2>&1 | tail -3
+  else
+    return 1
   fi
-  if command_exists dnf; then
-    sudo dnf install -y "$package"
-    return 0
-  fi
-  if command_exists yum; then
-    sudo yum install -y "$package"
-    return 0
-  fi
-  if command_exists pacman; then
-    sudo pacman -Sy --noconfirm "$package"
-    return 0
-  fi
-  if command_exists zypper; then
-    sudo zypper --non-interactive install "$package"
-    return 0
-  fi
-  if command_exists apk; then
-    sudo apk add "$package"
-    return 0
-  fi
-  if command_exists snap; then
-    sudo snap install "$package"
-    return 0
-  fi
-  if command_exists brew; then
-    brew install "$package"
-    return 0
-  fi
+}
 
-  return 1
+# WSL uses Linux package managers but we may need pip fallback for yt-dlp
+install_wsl() {
+  install_linux "$1"
 }
 
 install_windows() {
-  local package="$1"
+  local pkg="$1"
+  # Map generic package name to winget/scoop IDs
+  local winget_id scoop_id
+  case "$pkg" in
+    yt-dlp)  winget_id="yt-dlp.yt-dlp";    scoop_id="yt-dlp" ;;
+    ffmpeg)  winget_id="Gyan.FFmpeg";        scoop_id="ffmpeg" ;;
+    fzf)     winget_id="junegunn.fzf";       scoop_id="fzf" ;;
+    *)       winget_id="$pkg";               scoop_id="$pkg" ;;
+  esac
 
   if command_exists winget; then
-    winget install --id "$package" --accept-source-agreements --accept-package-agreements 2>/dev/null
+    winget install --id "$winget_id" --accept-source-agreements --accept-package-agreements 2>&1 | tail -5
     return 0
-  fi
-  if command_exists scoop; then
-    scoop install "$package"
+  elif command_exists scoop; then
+    scoop install "$scoop_id" 2>&1 | tail -5
     return 0
-  fi
-  if command_exists choco; then
-    choco install "$package" -y
+  elif command_exists choco; then
+    choco install "$scoop_id" -y 2>&1 | tail -5
     return 0
+  else
+    return 1
   fi
+}
 
+# ── pip fallback for yt-dlp when OS package manager doesn't have it ──────────
+install_ytdlp_pip() {
+  if command_exists pip3; then
+    pip3 install -U yt-dlp 2>&1 | tail -3 && return 0
+  elif command_exists pip; then
+    pip install -U yt-dlp 2>&1 | tail -3 && return 0
+  fi
   return 1
 }
 
-# ── winget IDs differ from package names ──────────────────────────────────────
-winget_id_for() {
-  case "$1" in
-    yt-dlp)  echo "yt-dlp.yt-dlp" ;;
-    ffmpeg)  echo "Gyan.FFmpeg" ;;
-    fzf)     echo "junegunn.fzf" ;;
-    *)       echo "$1" ;;
-  esac
-}
-
-# ── Ensure a dependency is installed ──────────────────────────────────────────
+# ── Ensure a package is installed ─────────────────────────────────────────────
 ensure_installed() {
   local name="$1"
+  local check_fn="${2:-command_exists}"   # optional custom checker
 
-  if command_exists "$name"; then
-    success "${BOLD}$name${RESET} is already installed."
-    return
+  if $check_fn "$name" 2>/dev/null; then
+    success "${BOLD}${name}${RESET} already installed"
+    return 0
   fi
 
-  warn "${BOLD}$name${RESET} not found — installing..."
+  warn "${BOLD}${name}${RESET} not found — installing..."
 
-  local os
-  os="$(detect_os)"
-
-  case "$os" in
-    mac)
-      install_mac "$name"
-      ;;
-    linux)
-      if ! install_linux "$name"; then
-        fail "Could not find a package manager to install ${BOLD}$name${RESET}."
-        exit 1
-      fi
-      ;;
-    windows)
-      local winget_name
-      winget_name="$(winget_id_for "$name")"
-      if ! install_windows "$winget_name"; then
-        fail "No supported Windows package manager found (winget/scoop/choco)."
-        exit 1
-      fi
-      ;;
-    *)
-      fail "Unsupported OS. Please install ${BOLD}$name${RESET} manually."
-      exit 1
-      ;;
+  local ok=false
+  case "$ENV" in
+    mac)     install_mac     "$name" && ok=true ;;
+    linux)   install_linux   "$name" && ok=true ;;
+    wsl)     install_wsl     "$name" && ok=true ;;
+    windows) install_windows "$name" && ok=true ;;
   esac
 
-  if command_exists "$name"; then
-    success "${BOLD}$name${RESET} installed successfully."
-  else
-    fail "${BOLD}$name${RESET} installation appears to have failed."
-    exit 1
+  # yt-dlp pip fallback
+  if [[ "$ok" == false && "$name" == "yt-dlp" ]]; then
+    warn "Trying pip install for yt-dlp..."
+    install_ytdlp_pip && ok=true
+  fi
+
+  if $check_fn "$name" 2>/dev/null; then
+    success "${BOLD}${name}${RESET} installed"
+    return 0
+  fi
+
+  if [[ "$ok" == false ]]; then
+    fail "Could not install ${BOLD}${name}${RESET}. Please install it manually."
+    p "  See: ${CYAN}https://github.com/yt-dlp/yt-dlp#installation${RESET}"
+    return 1
   fi
 }
 
-# ── Install Dependencies ─────────────────────────────────────────────────────
-echo -e "${BOLD}  Installing dependencies...${RESET}"
-echo ""
+# ── Install Dependencies ──────────────────────────────────────────────────────
+p "${BOLD}  Installing dependencies...${RESET}"
+p ""
 
-ensure_installed yt-dlp
-ensure_installed ffmpeg
-ensure_installed fzf
+ensure_installed yt-dlp ytdlp_exists || true
+ensure_installed ffmpeg             || true
 
-echo ""
-
-# ── Detect RC File ────────────────────────────────────────────────────────────
-RC_FILE="$(detect_rc_file)"
-
-if [[ ! -f "$RC_FILE" ]]; then
-  touch "$RC_FILE"
+# fzf is optional — interactive mode needs it, presets (-b/-a/-m) don't
+if ! command_exists fzf; then
+  warn "fzf not found — interactive format picker will be unavailable."
+  warn "Install fzf manually or use -b / -a / -m flags to skip the picker."
+else
+  success "${BOLD}fzf${RESET} already installed"
 fi
 
-info "Shell config: ${BOLD}$RC_FILE${RESET}"
+p ""
 
-# ── Remove Old Function (if exists) ──────────────────────────────────────────
-tmp_rc="$(mktemp)"
+# ── Prepare RC file ───────────────────────────────────────────────────────────
+if [[ ! -f "$RC_FILE" ]]; then
+  touch "$RC_FILE" 2>/dev/null || true
+fi
+info "Shell config: ${BOLD}${RC_FILE}${RESET}"
+
+# ── Remove old function block (portable — no mktemp path issues) ──────────────
+# Strip from "# YouTube Download" comment to the closing "}" of the function.
+# Written to a temp file then moved, with Windows-safe path handling.
+_tmp_rc="${RC_FILE}.ytd_tmp"
 awk '
-  BEGIN { in_block = 0 }
-  /^# YouTube Download \(yt-dlp\)/ || /^#+ YouTube Download/ { in_block = 1; next }
-  in_block == 1 && /^}$/ { in_block = 0; next }
-  in_block == 0 { print }
-' "$RC_FILE" > "$tmp_rc"
-mv "$tmp_rc" "$RC_FILE"
+  /^# YouTube Download \(yt-dlp\)/ { skip=1 }
+  skip && /^}$/ { skip=0; next }
+  !skip { print }
+' "$RC_FILE" > "$_tmp_rc" 2>/dev/null && mv "$_tmp_rc" "$RC_FILE" 2>/dev/null || true
 
-# ── Inject the youtube() Function ─────────────────────────────────────────────
-cat << 'FUNC_EOF' >> "$RC_FILE"
+# ── Inject the youtube() Function ────────────────────────────────────────────
+cat >> "$RC_FILE" << 'FUNC_EOF'
 
-#########################################################
 # YouTube Download (yt-dlp) — v2.3
-# Cookie-free by default. Auto-detects playlists.
-# Visual progress bar. Auto-update checking.
-#########################################################
+# Cookie-free. Auto-detects playlists. Visual progress bar. Auto-update.
 function youtube() {
-  # ── Version ──
-  local YTD_VERSION="2.3"
-  local YTD_REPO="Anuradhapumudu/ytd"
-  local YTD_RAW="https://raw.githubusercontent.com/${YTD_REPO}/main/install-ytd.sh"
 
-  # ── Colors ──
-  local _B='\033[1m' _D='\033[2m' _R='\033[0m'
-  local _BLUE='\033[34m' _CYAN='\033[36m' _GREEN='\033[32m'
-  local _YELLOW='\033[33m' _RED='\033[31m' _MAGENTA='\033[35m'
-  local _WHITE='\033[97m' _GRAY='\033[90m'
+  # ── Version / Update endpoint ──
+  local YTD_VERSION="2.3"
+  local YTD_RAW="https://raw.githubusercontent.com/Anuradhapumudu/ytd/main/install-ytd.sh"
+
+  # ── Portable printf wrappers ──
+  local _R='\033[0m' _B='\033[1m'
+  local _GREEN='\033[32m' _CYAN='\033[36m' _YELLOW='\033[33m'
+  local _RED='\033[31m'   _BLUE='\033[34m'  _MAGENTA='\033[35m'
+  local _GRAY='\033[90m'  _WHITE='\033[97m'
+
+  _ytd_line()  { printf '  %b-----------------------------------------------------%b\n' "$1" "$_R"; }
+  _ytd_ok()    { printf '  %b OK %b  %b\n' "$_GREEN" "$_R" "$1"; }
+  _ytd_info()  { printf '  %b    %b  %b\n' "$_CYAN"  "$_R" "$1"; }
+  _ytd_warn()  { printf '  %b WRN%b  %b\n' "$_YELLOW" "$_R" "$1"; }
+  _ytd_fail()  { printf '  %b ERR%b  %b\n' "$_RED"   "$_R" "$1"; }
 
   # ── Progress Bar Renderer ──
   # Single-line. No \n ever. Pure string ops — no grep/sed subprocesses.
   # All locals declared at top to prevent zsh variable-leak in pipe subshells.
   _ytd_progress() {
-    local _bw=35 _last=-1
+    local _bw=40 _last=-1
     local _ln _tmp _pct _f _e _bar _j _sz _sp _et
     while IFS= read -r _ln; do
       case "$_ln" in
@@ -267,696 +281,473 @@ function youtube() {
             _f=$((_pct * _bw / 100))
             _e=$((_bw - _f))
             _bar=""
-            _j=0; while [[ $_j -lt $_f ]]; do _bar="${_bar}█"; _j=$((_j + 1)); done
-            _j=0; while [[ $_j -lt $_e ]]; do _bar="${_bar}░"; _j=$((_j + 1)); done
+            _j=0; while [[ $_j -lt $_f ]]; do _bar="${_bar}#"; _j=$((_j+1)); done
+            _j=0; while [[ $_j -lt $_e ]]; do _bar="${_bar}-"; _j=$((_j+1)); done
             if [[ $_pct -ge 100 ]]; then
-              printf '\r\033[K  \033[32m%s\033[0m \033[1m100%%\033[0m  \033[90mComplete\033[0m' "$_bar"
+              printf '\r\033[K  \033[32m[%s]\033[0m \033[1m100%%\033[0m  \033[90mDone\033[0m     ' "$_bar"
             else
               _sz="..."; _sp="..."; _et="..."
               case "$_ln" in *" of "*) _tmp="${_ln#* of }"; _tmp="${_tmp#\~ }"; _tmp="${_tmp# }"; _sz="${_tmp%% *}";; esac
               case "$_ln" in *" at "*) _tmp="${_ln#* at }"; _tmp="${_tmp# }"; _sp="${_tmp%% *}";; esac
-              case "$_ln" in *"ETA "*) _tmp="${_ln#*ETA }"; _et="${_tmp%% *}";; esac
-              printf '\r\033[K  \033[32m%s\033[0m \033[1m%3d%%\033[0m  \033[90m%s  %s  ETA %s\033[0m' \
+              case "$_ln" in *"ETA "*) _tmp="${_ln#*ETA }";  _et="${_tmp%% *}";; esac
+              printf '\r\033[K  \033[32m[%s]\033[0m \033[1m%3d%%\033[0m  \033[90m%s  %s  ETA %s\033[0m' \
                 "$_bar" "$_pct" "$_sz" "$_sp" "$_et"
             fi
           fi
           ;;
-        "[Merger]"*)
-          printf '\r\033[K  \033[36m⟳\033[0m  Merging video + audio...'
-          ;;
-        "[ExtractAudio]"*)
-          printf '\r\033[K  \033[35m♫\033[0m  Extracting audio...'
-          ;;
+        "[Merger]"*)     printf '\r\033[K  [~] Merging video + audio...' ;;
+        "[ExtractAudio]"*) printf '\r\033[K  [~] Extracting audio...' ;;
         "[download] Downloading"*)
           _tmp="${_ln#\[download\] }"
-          printf '\r\033[K  \033[36m▶\033[0m  %s' "$_tmp"
-          _last=-1
-          ;;
-        "[download] Destination:"*)
-          _last=-1
-          ;;
+          printf '\r\033[K  [>] %s' "$_tmp"
+          _last=-1 ;;
+        "[download] Destination:"*) _last=-1 ;;
         "[download]"*"already been downloaded"*)
-          printf '\r\033[K  \033[90m⏭  Skipping (already downloaded)\033[0m'
-          ;;
+          printf '\r\033[K  [=] Skipping (already downloaded)' ;;
       esac
     done
     printf '\r\033[K'
   }
 
   # ── Argument Parsing ──
-  local use_cookies=false
-  local mode="interactive"   # interactive | best | audio-mp3 | audio-m4a
-  local output_format="mp4"
-  local download_dir="$HOME/Downloads"
-  local notify=false
-  local force_playlist=false
-  local url=""
+  local use_cookies=false mode="interactive" output_format="mp4"
+  local download_dir="$HOME/Downloads" notify=false force_playlist=false url=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
       -h|--help)
-        echo ""
-        echo -e "${_CYAN}${_B}  ▶  YouTube Downloader  v${YTD_VERSION}${_R}"
-        echo ""
-        echo -e "  ${_B}USAGE${_R}"
-        echo -e "    ${_GREEN}youtube${_R} ${_GRAY}[options]${_R} ${_WHITE}<url>${_R}"
-        echo ""
-        echo -e "  ${_B}OPTIONS${_R}"
-        echo -e "    ${_GREEN}-b${_R}, ${_GREEN}--best${_R}        Download best quality (skip picker)"
-        echo -e "    ${_GREEN}-a${_R}, ${_GREEN}--audio${_R}       Download audio only (MP3, 320kbps)"
-        echo -e "    ${_GREEN}-m${_R}, ${_GREEN}--m4a${_R}         Download audio only (M4A/AAC)"
-        echo -e "    ${_GREEN}-p${_R}, ${_GREEN}--playlist${_R}    Force playlist mode (skip confirmation)"
-        echo -e "    ${_GREEN}-c${_R}, ${_GREEN}--cookies${_R}     Use browser cookies (private/age-restricted)"
-        echo -e "    ${_GREEN}-o${_R}, ${_GREEN}--output${_R} DIR  Set download directory (default: ~/Downloads)"
-        echo -e "    ${_GREEN}--mkv${_R}            Output as MKV instead of MP4"
-        echo -e "    ${_GREEN}-n${_R}, ${_GREEN}--notify${_R}      Send desktop notification on completion (macOS)"
-        echo -e "    ${_GREEN}--update${_R}         Update to the latest version from GitHub"
-        echo -e "    ${_GREEN}--version${_R}        Show current version"
-        echo -e "    ${_GREEN}-h${_R}, ${_GREEN}--help${_R}        Show this help"
-        echo ""
-        echo -e "  ${_B}EXAMPLES${_R}"
-        echo -e "    ${_GRAY}# Interactive format picker (single video)${_R}"
-        echo -e "    youtube https://youtu.be/dQw4w9WgXcQ"
-        echo ""
-        echo -e "    ${_GRAY}# Best quality, no picker${_R}"
-        echo -e "    youtube -b https://youtu.be/dQw4w9WgXcQ"
-        echo ""
-        echo -e "    ${_GRAY}# Audio only (MP3)${_R}"
-        echo -e "    youtube -a https://youtu.be/dQw4w9WgXcQ"
-        echo ""
-        echo -e "    ${_GRAY}# Download entire playlist (auto-detected)${_R}"
-        echo -e "    youtube -b https://youtube.com/playlist?list=PLxxxxxx"
-        echo ""
-        echo -e "    ${_GRAY}# Playlist audio-only, skip confirmation${_R}"
-        echo -e "    youtube -p -a https://youtube.com/playlist?list=PLxxxxxx"
-        echo ""
-        echo -e "    ${_GRAY}# Private video with cookies${_R}"
-        echo -e "    youtube -c https://youtu.be/PRIVATE_ID"
-        echo ""
-        return 0
-        ;;
-      -b|--best)
-        mode="best"
-        shift
-        ;;
-      -a|--audio)
-        mode="audio-mp3"
-        shift
-        ;;
-      -m|--m4a)
-        mode="audio-m4a"
-        shift
-        ;;
-      -p|--playlist)
-        force_playlist=true
-        shift
-        ;;
-      -c|--cookies)
-        use_cookies=true
-        shift
-        ;;
+        printf '\n%b  YouTube Downloader  v%s%b\n\n' "$_CYAN$_B" "$YTD_VERSION" "$_R"
+        printf '  %bUSAGE%b\n    youtube [options] <url>\n\n' "$_B" "$_R"
+        printf '  %bOPTIONS%b\n' "$_B" "$_R"
+        printf '    %b-b%b, %b--best%b       Download best quality (skip picker)\n' "$_GREEN" "$_R" "$_GREEN" "$_R"
+        printf '    %b-a%b, %b--audio%b      Audio only (MP3 320kbps)\n' "$_GREEN" "$_R" "$_GREEN" "$_R"
+        printf '    %b-m%b, %b--m4a%b        Audio only (M4A/AAC)\n' "$_GREEN" "$_R" "$_GREEN" "$_R"
+        printf '    %b-p%b, %b--playlist%b   Force playlist mode (skip confirmation)\n' "$_GREEN" "$_R" "$_GREEN" "$_R"
+        printf '    %b-c%b, %b--cookies%b    Use browser cookies (private/restricted)\n' "$_GREEN" "$_R" "$_GREEN" "$_R"
+        printf '    %b-o%b, %b--output%b DIR Download directory (default: ~/Downloads)\n' "$_GREEN" "$_R" "$_GREEN" "$_R"
+        printf '    %b--mkv%b               Output as MKV\n' "$_GREEN" "$_R"
+        printf '    %b-n%b, %b--notify%b     Desktop notification on completion (macOS)\n' "$_GREEN" "$_R" "$_GREEN" "$_R"
+        printf '    %b--update%b            Update to latest version from GitHub\n' "$_GREEN" "$_R"
+        printf '    %b--version%b           Show version\n' "$_GREEN" "$_R"
+        printf '    %b-h%b, %b--help%b       Show this help\n\n' "$_GREEN" "$_R" "$_GREEN" "$_R"
+        printf '  %bEXAMPLES%b\n' "$_B" "$_R"
+        printf '    youtube https://youtu.be/dQw4w9WgXcQ\n'
+        printf '    youtube -b https://youtu.be/dQw4w9WgXcQ\n'
+        printf '    youtube -a https://youtu.be/dQw4w9WgXcQ\n'
+        printf '    youtube -b https://youtube.com/playlist?list=PLxxxxxx\n\n'
+        return 0 ;;
+      -b|--best)     mode="best";      shift ;;
+      -a|--audio)    mode="audio-mp3"; shift ;;
+      -m|--m4a)      mode="audio-m4a"; shift ;;
+      -p|--playlist) force_playlist=true; shift ;;
+      -c|--cookies)  use_cookies=true;    shift ;;
       -o|--output)
         if [[ -n "${2:-}" && ! "$2" =~ ^- ]]; then
-          download_dir="$2"
-          shift 2
+          download_dir="$2"; shift 2
         else
-          echo -e "  ${_RED}✖${_R}  ${_RED}--output requires a directory path${_R}"
-          return 1
-        fi
-        ;;
-      --mkv)
-        output_format="mkv"
-        shift
-        ;;
-      -n|--notify)
-        notify=true
-        shift
-        ;;
+          _ytd_fail "--output requires a directory path"; return 1
+        fi ;;
+      --mkv)     output_format="mkv"; shift ;;
+      -n|--notify) notify=true;       shift ;;
       --update)
-        echo ""
-        echo -e "  ${_CYAN}⟳${_R}  Updating YouTube Downloader..."
-        echo ""
-        if bash <(curl -sL "$YTD_RAW"); then
-          rm -f "$HOME/.ytd_update_notice"
-          echo ""
-          echo -e "  ${_GREEN}✔${_R}  Update complete. Run ${_B}source $([ -f ~/.zshrc ] && echo ~/.zshrc || echo ~/.bashrc)${_R} to apply."
+        printf '\n  [~] Checking for updates...\n\n'
+        local _upd_tmp
+        _upd_tmp=$(mktemp 2>/dev/null || printf '%s' "${TMPDIR:-/tmp}/ytd_update_$$.sh")
+        if curl -fsSL --max-time 30 "$YTD_RAW" -o "$_upd_tmp" 2>/dev/null \
+           && [[ -s "$_upd_tmp" ]]; then
+          bash "$_upd_tmp"
+          rm -f "$_upd_tmp" 2>/dev/null || true
+          rm -f "$HOME/.ytd_update_notice" 2>/dev/null || true
+          printf '\n  %b[OK]%b Updated! Reload your shell to apply.\n\n' "$_GREEN" "$_R"
         else
-          echo -e "  ${_RED}✖${_R}  Update failed. Check your internet connection."
+          rm -f "$_upd_tmp" 2>/dev/null || true
+          _ytd_fail "Update failed. Check your internet connection."
         fi
-        return 0
-        ;;
+        return 0 ;;
       --version)
-        echo -e "  ${_CYAN}▶${_R}  YouTube Downloader ${_B}v${YTD_VERSION}${_R}"
-        return 0
-        ;;
+        printf '  YouTube Downloader %bv%s%b\n' "$_B" "$YTD_VERSION" "$_R"
+        return 0 ;;
       -*)
-        echo -e "  ${_RED}✖${_R}  Unknown option: ${_B}$1${_R}"
-        echo -e "  ${_GRAY}Run ${_GREEN}youtube --help${_GRAY} for usage.${_R}"
-        return 1
-        ;;
-      *)
-        url="$1"
-        shift
-        ;;
+        _ytd_fail "Unknown option: $1  (run 'youtube --help' for usage)"
+        return 1 ;;
+      *) url="$1"; shift ;;
     esac
   done
 
-  # ── Auto-Update Check (background, once per 24h) ──
+  # ── Background auto-update check (once per 24 h) ──────────────────────────
   (
-    local _check_file="$HOME/.ytd_last_check"
-    local _notice_file="$HOME/.ytd_update_notice"
-    local _now; _now=$(date +%s)
-    local _last=0
-    [[ -f "$_check_file" ]] && _last=$(cat "$_check_file" 2>/dev/null)
+    local _cf="$HOME/.ytd_last_check" _nf="$HOME/.ytd_update_notice"
+    local _now _last _remote
+    _now=$(date +%s 2>/dev/null) || _now=0
+    _last=0; [[ -f "$_cf" ]] && _last=$(cat "$_cf" 2>/dev/null || echo 0)
     if (( _now - _last > 86400 )); then
-      echo "$_now" > "$_check_file"
-      local _remote
-      _remote=$(curl -sL --max-time 5 "$YTD_RAW" 2>/dev/null | grep -m1 'YTD_VERSION=' | head -1 | cut -d'"' -f2)
+      printf '%s' "$_now" > "$_cf" 2>/dev/null || true
+      _remote=$(curl -fsSL --max-time 5 "$YTD_RAW" 2>/dev/null \
+                | grep -m1 'YTD_VERSION=' | cut -d'"' -f2)
       if [[ -n "$_remote" && "$_remote" != "$YTD_VERSION" ]]; then
-        echo "$_remote" > "$_notice_file"
+        printf '%s' "$_remote" > "$_nf" 2>/dev/null || true
       else
-        rm -f "$_notice_file"
+        rm -f "$_nf" 2>/dev/null || true
       fi
     fi
-  ) &>/dev/null &
-  disown 2>/dev/null
+  ) >/dev/null 2>&1 &
+  { disown 2>/dev/null || true; } 2>/dev/null || true
 
-  # ── Show Update Notice (if available from previous check) ──
+  # Show pending update notice
   if [[ -f "$HOME/.ytd_update_notice" ]]; then
-    local _new_ver
-    _new_ver=$(cat "$HOME/.ytd_update_notice" 2>/dev/null)
-    if [[ -n "$_new_ver" && "$_new_ver" != "$YTD_VERSION" ]]; then
-      echo -e "  ${_YELLOW}⬆${_R}  Update available: ${_B}v${_new_ver}${_R} ${_GRAY}(current: v${YTD_VERSION})${_R}. Run ${_GREEN}youtube --update${_R} to upgrade."
-    else
-      rm -f "$HOME/.ytd_update_notice"
+    local _nv; _nv=$(cat "$HOME/.ytd_update_notice" 2>/dev/null || true)
+    if [[ -n "$_nv" && "$_nv" != "$YTD_VERSION" ]]; then
+      printf '  %b[^]%b  Update available: v%s  (run: youtube --update)\n\n' \
+        "$_YELLOW" "$_R" "$_nv"
     fi
   fi
 
-  # ── Validate URL ──
+  # ── Validate URL ──────────────────────────────────────────────────────────
   if [[ -z "$url" ]]; then
-    echo ""
-    echo -e "  ${_CYAN}${_B}▶  YouTube Downloader  v${YTD_VERSION}${_R}"
-    echo ""
-    echo -e "  ${_RED}✖${_R}  No URL provided."
-    echo -e "  ${_GRAY}Usage: ${_GREEN}youtube${_GRAY} [options] <url>${_R}"
-    echo -e "  ${_GRAY}Run ${_GREEN}youtube --help${_GRAY} for full usage.${_R}"
-    echo ""
+    printf '\n  %bYouTube Downloader  v%s%b\n\n' "$_CYAN$_B" "$YTD_VERSION" "$_R"
+    _ytd_fail "No URL provided.  Usage: youtube [options] <url>"
+    printf '  Run %byoutube --help%b for full usage.\n\n' "$_GREEN" "$_R"
     return 1
   fi
 
-  # ── Check Dependencies ──
-  local missing=()
-  command -v yt-dlp  >/dev/null 2>&1 || missing+=(yt-dlp)
-  command -v ffmpeg  >/dev/null 2>&1 || missing+=(ffmpeg)
-  if [[ "$mode" == "interactive" ]]; then
-    command -v fzf >/dev/null 2>&1 || missing+=(fzf)
-  fi
-
-  if [[ ${#missing[@]} -gt 0 ]]; then
-    echo -e "  ${_RED}✖${_R}  Missing dependencies: ${_B}${missing[*]}${_R}"
-    echo -e "  ${_GRAY}Re-run the installer or install manually.${_R}"
+  # ── Check dependencies ────────────────────────────────────────────────────
+  local _missing=()
+  command -v yt-dlp >/dev/null 2>&1 || _missing+=(yt-dlp)
+  command -v ffmpeg  >/dev/null 2>&1 || _missing+=(ffmpeg)
+  [[ "$mode" == "interactive" ]] && { command -v fzf >/dev/null 2>&1 || _missing+=(fzf); }
+  if [[ ${#_missing[@]} -gt 0 ]]; then
+    _ytd_fail "Missing: ${_missing[*]}.  Re-run the installer."
     return 1
   fi
 
-  # ── Cookie Handling (opt-in only — no Keychain prompt by default) ──
+  # ── Cookie args ───────────────────────────────────────────────────────────
   local cookie_args=()
-
   if [[ "$use_cookies" == true ]]; then
-    local browser_found=false
+    local _browser=""
+    command -v google-chrome       >/dev/null 2>&1 && _browser="chrome"
+    command -v google-chrome-stable>/dev/null 2>&1 && _browser="chrome"
+    command -v chromium            >/dev/null 2>&1 && _browser="${_browser:-chromium}"
+    command -v chromium-browser    >/dev/null 2>&1 && _browser="${_browser:-chromium}"
+    command -v brave-browser       >/dev/null 2>&1 && _browser="${_browser:-brave}"
+    command -v firefox             >/dev/null 2>&1 && _browser="${_browser:-firefox}"
+    [[ -d "/Applications/Google Chrome.app" ]] && _browser="chrome"
+    [[ -d "/Applications/Brave Browser.app" ]] && _browser="${_browser:-brave}"
 
-    # macOS
-    if [[ -d "/Applications/Google Chrome.app" ]]; then
-      cookie_args=(--cookies-from-browser chrome)
-      browser_found=true
-      if pgrep -x "Google Chrome" >/dev/null 2>&1; then
-        echo -e "  ${_YELLOW}⚠${_R}  Chrome is running — quit it (${_B}Cmd+Q${_R}) if cookie extraction fails."
-      fi
-    elif [[ -d "/Applications/Brave Browser.app" ]]; then
-      cookie_args=(--cookies-from-browser brave)
-      browser_found=true
-      if pgrep -x "Brave Browser" >/dev/null 2>&1; then
-        echo -e "  ${_YELLOW}⚠${_R}  Brave is running — quit it (${_B}Cmd+Q${_R}) if cookie extraction fails."
-      fi
-    fi
-
-    # Linux / Windows — try common Chromium paths
-    if [[ "$browser_found" == false ]]; then
-      if command -v google-chrome >/dev/null 2>&1 || command -v google-chrome-stable >/dev/null 2>&1; then
-        cookie_args=(--cookies-from-browser chrome)
-        browser_found=true
-      elif command -v chromium >/dev/null 2>&1 || command -v chromium-browser >/dev/null 2>&1; then
-        cookie_args=(--cookies-from-browser chromium)
-        browser_found=true
-      elif command -v brave-browser >/dev/null 2>&1; then
-        cookie_args=(--cookies-from-browser brave)
-        browser_found=true
-      elif command -v firefox >/dev/null 2>&1; then
-        cookie_args=(--cookies-from-browser firefox)
-        browser_found=true
-      fi
-    fi
-
-    if [[ "$browser_found" == true ]]; then
-      echo -e "  ${_BLUE}ℹ${_R}  Using browser cookies. macOS may prompt for Keychain access."
+    if [[ -n "$_browser" ]]; then
+      cookie_args=(--cookies-from-browser "$_browser")
+      _ytd_info "Using ${_browser} cookies"
     else
-      echo -e "  ${_YELLOW}⚠${_R}  No supported browser found — continuing without cookies."
+      _ytd_warn "No supported browser found — continuing without cookies"
     fi
   fi
 
-  # ── Ensure download directory exists ──
-  mkdir -p "$download_dir"
+  mkdir -p "$download_dir" 2>/dev/null || true
 
-  # ═══════════════════════════════════════════════════════════════════════════
-  # ── AUTO-DETECT: Playlist or Single Video? ──
-  # ═══════════════════════════════════════════════════════════════════════════
+  # ── Playlist detection ─────────────────────────────────────────────────────
   local is_playlist=false
-
-  if [[ "$url" == *"playlist?list="* ]] || [[ "$url" == *"/sets/"* ]]; then
-    is_playlist=true
-  elif [[ "$url" == *"&list="* ]] || [[ "$url" == *"?list="* ]]; then
-    is_playlist=true
-  fi
-
-  if [[ "$force_playlist" == true ]]; then
-    is_playlist=true
-  fi
+  [[ "$url" == *"playlist?list="* ]] && is_playlist=true
+  [[ "$url" == *"&list="*         ]] && is_playlist=true
+  [[ "$url" == *"?list="*         ]] && is_playlist=true
+  [[ "$url" == *"/sets/"*         ]] && is_playlist=true
+  [[ "$force_playlist" == true    ]] && is_playlist=true
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # ── PLAYLIST MODE ──
+  # PLAYLIST MODE
   # ═══════════════════════════════════════════════════════════════════════════
   if [[ "$is_playlist" == true ]]; then
+    printf '\n'
+    printf '  [~] Scanning playlist...'
 
-    echo ""
-    echo -ne "  ${_CYAN}⟳${_R}  Scanning playlist..."
+    local _pl_info _pl_title _pl_count
+    _pl_info=$(yt-dlp "${cookie_args[@]}" --flat-playlist --dump-json "$url" 2>/dev/null || true)
 
-    local playlist_info playlist_title playlist_count
-    playlist_info=$(yt-dlp "${cookie_args[@]}" --flat-playlist --dump-json "$url" 2>/dev/null)
-
-    if [[ -z "$playlist_info" ]]; then
-      echo -ne "\r\033[K"
-      echo -e "  ${_RED}✖${_R}  ${_RED}Could not fetch playlist info.${_R}"
-      if [[ "$use_cookies" == false ]]; then
-        echo -e "  ${_YELLOW}💡${_R}  ${_YELLOW}If this is a private playlist, retry with:${_R}"
-        echo -e "     ${_GREEN}youtube -c ${url}${_R}"
-      fi
+    if [[ -z "$_pl_info" ]]; then
+      printf '\r\033[K'
+      _ytd_fail "Could not fetch playlist info."
+      [[ "$use_cookies" == false ]] && printf '  Tip: retry with %b-c%b for private playlists\n' "$_GREEN" "$_R"
       return 1
     fi
 
-    playlist_count=$(echo "$playlist_info" | wc -l | tr -d ' ')
+    _pl_count=$(printf '%s\n' "$_pl_info" | wc -l | tr -d ' ')
+    _pl_title=$(printf '%s\n' "$_pl_info" | head -1 \
+      | grep -o '"playlist_title":"[^"]*"' | head -1 | cut -d'"' -f4)
+    [[ -z "$_pl_title" ]] && _pl_title="Playlist"
 
-    playlist_title=$(echo "$playlist_info" | head -1 | grep -o '"playlist_title":"[^"]*"' | head -1 | cut -d'"' -f4)
-    if [[ -z "$playlist_title" ]]; then
-      playlist_title="Playlist"
-    fi
+    printf '\r\033[K'
+    printf '\n'
+    _ytd_line "$_MAGENTA"
+    printf '  %b  [=] %s%b\n' "$_B$_WHITE" "$_pl_title" "$_R"
+    printf '  %b      %s videos%b\n' "$_GRAY" "$_pl_count" "$_R"
+    _ytd_line "$_MAGENTA"
+    printf '\n'
 
-    echo -ne "\r\033[K"
-
-    # ── Playlist Info Card ──
-    echo -e "  ${_MAGENTA}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${_R}"
-    echo -e "  ${_B}${_WHITE}  📋  ${playlist_title}${_R}"
-    echo -e "  ${_GRAY}      ${playlist_count} videos${_R}"
-    echo -e "  ${_MAGENTA}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${_R}"
-    echo ""
-
-    # ── Confirmation (unless -p was passed) ──
+    # Confirmation
     if [[ "$force_playlist" == false ]]; then
-      local confirm_msg
+      local _cm
       case "$mode" in
-        best)       confirm_msg="best quality" ;;
-        audio-mp3)  confirm_msg="audio (MP3)" ;;
-        audio-m4a)  confirm_msg="audio (M4A)" ;;
-        *)          confirm_msg="best quality" ;;
+        best)      _cm="best quality" ;;
+        audio-mp3) _cm="audio (MP3)"  ;;
+        audio-m4a) _cm="audio (M4A)"  ;;
+        *)         _cm="best quality"; mode="best" ;;
       esac
-
-      echo -ne "  ${_YELLOW}?${_R}  Download all ${_B}${playlist_count}${_R} videos as ${_B}${confirm_msg}${_R}? [Y/n] "
-      local answer
-      read -r answer
-      case "$answer" in
-        [nN]|[nN][oO])
-          echo -e "  ${_YELLOW}✖${_R}  ${_YELLOW}Download cancelled.${_R}"
-          return 0
-          ;;
-      esac
-
-      if [[ "$mode" == "interactive" ]]; then
-        mode="best"
-      fi
-    else
-      if [[ "$mode" == "interactive" ]]; then
-        mode="best"
-      fi
+      printf '  [?] Download all %b%s%b videos as %b%s%b? [Y/n] ' \
+        "$_B" "$_pl_count" "$_R" "$_B" "$_cm" "$_R"
+      local _ans; read -r _ans
+      case "$_ans" in [nN]*) _ytd_warn "Cancelled."; return 0 ;; esac
     fi
+    [[ "$mode" == "interactive" ]] && mode="best"
 
-    # ── Create playlist subdirectory ──
-    local playlist_dir="$download_dir/${playlist_title}"
-    mkdir -p "$playlist_dir"
+    local _pl_dir="${download_dir}/${_pl_title}"
+    mkdir -p "$_pl_dir" 2>/dev/null || true
 
-    echo ""
-    local dl_label
+    local _dl_lbl
     case "$mode" in
-      best)       dl_label="best quality" ;;
-      audio-mp3)  dl_label="audio (MP3 320kbps)" ;;
-      audio-m4a)  dl_label="audio (M4A/AAC)" ;;
+      best)      _dl_lbl="best quality" ;;
+      audio-mp3) _dl_lbl="audio MP3"    ;;
+      audio-m4a) _dl_lbl="audio M4A"   ;;
     esac
 
-    echo -e "  ${_GREEN}▶${_R}  Downloading ${_B}${playlist_count} videos${_R} — ${_B}${dl_label}${_R}"
-    echo -e "  ${_GRAY}   📁  ${playlist_dir}${_R}"
-    echo ""
+    printf '\n'
+    _ytd_info "Downloading ${_B}${_pl_count} videos${_R} — ${_B}${_dl_lbl}${_R}"
+    _ytd_info "Saving to: ${_GRAY}${_pl_dir}${_R}"
+    printf '\n'
 
-    local start_time=$SECONDS
-    local dl_status=0
+    local _t0=$SECONDS _dls=0
 
     case "$mode" in
       best)
-        (set -o pipefail; yt-dlp \
-          "${cookie_args[@]}" \
-          --yes-playlist \
-          -f "bestvideo+bestaudio/best" \
-          --merge-output-format "$output_format" \
-          --newline \
-          -o "$playlist_dir/%(playlist_index)03d - %(title).180s.%(ext)s" \
-          "$url" 2>&1 | _ytd_progress) || dl_status=$?
+        { yt-dlp "${cookie_args[@]}" --yes-playlist \
+            -f "bestvideo+bestaudio/best" \
+            --merge-output-format "$output_format" \
+            --newline \
+            -o "${_pl_dir}/%(playlist_index)03d - %(title).180s.%(ext)s" \
+            "$url" 2>&1; } | _ytd_progress || _dls=$?
         ;;
       audio-mp3)
-        (set -o pipefail; yt-dlp \
-          "${cookie_args[@]}" \
-          --yes-playlist \
-          -x --audio-format mp3 --audio-quality 0 \
-          --newline \
-          -o "$playlist_dir/%(playlist_index)03d - %(title).180s.%(ext)s" \
-          "$url" 2>&1 | _ytd_progress) || dl_status=$?
+        { yt-dlp "${cookie_args[@]}" --yes-playlist \
+            -x --audio-format mp3 --audio-quality 0 \
+            --newline \
+            -o "${_pl_dir}/%(playlist_index)03d - %(title).180s.%(ext)s" \
+            "$url" 2>&1; } | _ytd_progress || _dls=$?
         ;;
       audio-m4a)
-        (set -o pipefail; yt-dlp \
-          "${cookie_args[@]}" \
-          --yes-playlist \
-          -x --audio-format m4a --audio-quality 0 \
-          --newline \
-          -o "$playlist_dir/%(playlist_index)03d - %(title).180s.%(ext)s" \
-          "$url" 2>&1 | _ytd_progress) || dl_status=$?
+        { yt-dlp "${cookie_args[@]}" --yes-playlist \
+            -x --audio-format m4a --audio-quality 0 \
+            --newline \
+            -o "${_pl_dir}/%(playlist_index)03d - %(title).180s.%(ext)s" \
+            "$url" 2>&1; } | _ytd_progress || _dls=$?
         ;;
     esac
 
-    local elapsed=$(( SECONDS - start_time ))
+    local _elapsed=$(( SECONDS - _t0 ))
+    local _fc; _fc=$(find "$_pl_dir" -maxdepth 1 -type f 2>/dev/null | wc -l | tr -d ' ')
 
-    local elapsed_str
-    if [[ $elapsed -ge 3600 ]]; then
-      elapsed_str="$((elapsed / 3600))h $((elapsed % 3600 / 60))m $((elapsed % 60))s"
-    elif [[ $elapsed -ge 60 ]]; then
-      elapsed_str="$((elapsed / 60))m $((elapsed % 60))s"
+    printf '\n'
+    if [[ $_dls -eq 0 ]]; then
+      _ytd_line "$_GREEN"
+      _ytd_ok  "${_B}Playlist download complete${_R}  ${_GRAY}(${_elapsed}s)${_R}"
+      _ytd_info "${_GRAY}${_fc} files  ->  ${_pl_dir}${_R}"
+      _ytd_line "$_GREEN"
+      [[ "$notify" == true ]] && command -v osascript >/dev/null 2>&1 && \
+        osascript -e "display notification \"${_pl_title}\" with title \"Download Complete\" sound name \"Glass\"" 2>/dev/null || true
     else
-      elapsed_str="${elapsed}s"
+      _ytd_line "$_YELLOW"
+      _ytd_warn "${_B}Download finished with some errors${_R}  ${_GRAY}(${_elapsed}s)${_R}"
+      _ytd_info "${_GRAY}${_fc} files  ->  ${_pl_dir}${_R}"
+      _ytd_line "$_YELLOW"
     fi
-
-    echo ""
-    if [[ $dl_status -eq 0 ]]; then
-      local file_count
-      file_count=$(find "$playlist_dir" -maxdepth 1 -type f 2>/dev/null | wc -l | tr -d ' ')
-
-      echo -e "  ${_GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${_R}"
-      echo -e "  ${_GREEN}✔${_R}  ${_B}Playlist download complete${_R}  ${_GRAY}(${elapsed_str})${_R}"
-      echo -e "  ${_GRAY}     ${file_count} files downloaded${_R}"
-      echo -e "  ${_GRAY}   📁  ${playlist_dir}${_R}"
-      echo -e "  ${_GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${_R}"
-
-      if [[ "$notify" == true ]] && command -v osascript >/dev/null 2>&1; then
-        osascript -e "display notification \"${playlist_title} — ${file_count} files\" with title \"Playlist Download Complete\" sound name \"Glass\""
-      fi
-    else
-      echo -e "  ${_YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${_R}"
-      echo -e "  ${_YELLOW}⚠${_R}  ${_B}Playlist download finished with errors${_R}  ${_GRAY}(${elapsed_str})${_R}"
-      echo -e "  ${_GRAY}     Some videos may have been skipped.${_R}"
-      echo -e "  ${_GRAY}   📁  ${playlist_dir}${_R}"
-      echo -e "  ${_YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${_R}"
-      return 1
-    fi
-
     return 0
   fi
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # ── SINGLE VIDEO MODE ──
+  # SINGLE VIDEO MODE
   # ═══════════════════════════════════════════════════════════════════════════
 
-  # ── Fetch Video Info (title, channel, duration) ──
-  # Uses --print for reliable extraction instead of JSON parsing
-  echo ""
-  echo -ne "  ${_CYAN}⟳${_R}  Fetching video info..."
+  # Fetch info
+  printf '\n  [~] Fetching video info...'
 
-  local video_title="Unknown Title"
-  local video_channel=""
-  local video_duration=""
-  local video_info_raw
-
-  video_info_raw=$(yt-dlp "${cookie_args[@]}" --no-playlist \
+  local _vtitle="Unknown Title" _vchan="Unknown" _vdur="?"
+  local _vinfo
+  _vinfo=$(yt-dlp "${cookie_args[@]}" --no-playlist \
     --print "%(title)s" \
     --print "%(channel)s" \
     --print "%(duration_string)s" \
     "$url" 2>/dev/null || true)
 
-  if [[ -n "$video_info_raw" ]]; then
-    video_title=$(echo "$video_info_raw" | sed -n '1p')
-    video_channel=$(echo "$video_info_raw" | sed -n '2p')
-    video_duration=$(echo "$video_info_raw" | sed -n '3p')
+  if [[ -n "$_vinfo" ]]; then
+    _vtitle=$(printf '%s\n' "$_vinfo" | sed -n '1p')
+    _vchan=$(printf '%s\n'  "$_vinfo" | sed -n '2p')
+    _vdur=$(printf '%s\n'   "$_vinfo" | sed -n '3p')
   fi
+  [[ -z "$_vtitle" ]] && _vtitle="Unknown Title"
+  [[ -z "$_vchan"  ]] && _vchan="Unknown"
+  [[ -z "$_vdur"   ]] && _vdur="?"
 
-  # Fallbacks for empty fields
-  [[ -z "$video_title" ]] && video_title="Unknown Title"
-  [[ -z "$video_channel" ]] && video_channel="Unknown"
-  [[ -z "$video_duration" ]] && video_duration="?"
+  printf '\r\033[K'
 
-  echo -ne "\r\033[K"
+  # Info card
+  _ytd_line "$_CYAN"
+  printf '  %b  %s%b\n'  "$_B$_WHITE" "$_vtitle" "$_R"
+  printf '  %b  %s  *  %s%b\n' "$_GRAY" "$_vchan" "$_vdur" "$_R"
+  _ytd_line "$_CYAN"
+  printf '\n'
 
-  # ── Video Info Card ──
-  echo -e "  ${_CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${_R}"
-  echo -e "  ${_B}${_WHITE}  ${video_title}${_R}"
-  echo -e "  ${_GRAY}  ${video_channel}  •  ${video_duration}${_R}"
-  echo -e "  ${_CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${_R}"
-  echo ""
-
-  # ── Mode: Best Quality ──
+  # ── Mode: Best ─────────────────────────────────────────────────────────────
   if [[ "$mode" == "best" ]]; then
-    echo -e "  ${_GREEN}▶${_R}  Downloading ${_B}best quality${_R} → ${_GRAY}$download_dir${_R}"
-    echo ""
-
-    local start_time=$SECONDS
-    local dl_status=0
-
-    (set -o pipefail; yt-dlp \
-      "${cookie_args[@]}" \
-      --no-playlist \
-      -f "bestvideo+bestaudio/best" \
-      --merge-output-format "$output_format" \
-      --newline \
-      -o "$download_dir/%(title).200s.%(ext)s" \
-      "$url" 2>&1 | _ytd_progress) || dl_status=$?
-
-    if [[ $dl_status -eq 0 ]]; then
-      local elapsed=$(( SECONDS - start_time ))
-      echo ""
-      echo -e "  ${_GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${_R}"
-      echo -e "  ${_GREEN}✔${_R}  ${_B}Download complete${_R}  ${_GRAY}(${elapsed}s)${_R}"
-      echo -e "  ${_GRAY}   📁  $download_dir${_R}"
-      echo -e "  ${_GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${_R}"
-
-      if [[ "$notify" == true ]] && command -v osascript >/dev/null 2>&1; then
-        osascript -e "display notification \"${video_title}\" with title \"Download Complete\" sound name \"Glass\""
-      fi
+    _ytd_info "Downloading ${_B}best quality${_R} -> ${_GRAY}${download_dir}${_R}"
+    printf '\n'
+    local _t0=$SECONDS _dls=0
+    { yt-dlp "${cookie_args[@]}" --no-playlist \
+        -f "bestvideo+bestaudio/best" \
+        --merge-output-format "$output_format" \
+        --newline \
+        -o "${download_dir}/%(title).200s.%(ext)s" \
+        "$url" 2>&1; } | _ytd_progress || _dls=$?
+    if [[ $_dls -eq 0 ]]; then
+      local _e=$(( SECONDS - _t0 ))
+      printf '\n'; _ytd_line "$_GREEN"
+      _ytd_ok "${_B}Download complete${_R}  ${_GRAY}(${_e}s)${_R}"
+      _ytd_info "${_GRAY}${download_dir}${_R}"
+      _ytd_line "$_GREEN"
+      [[ "$notify" == true ]] && command -v osascript >/dev/null 2>&1 && \
+        osascript -e "display notification \"${_vtitle}\" with title \"Download Complete\" sound name \"Glass\"" 2>/dev/null || true
     else
-      echo ""
-      echo -e "  ${_RED}✖${_R}  ${_RED}Download failed.${_R}"
+      printf '\n'; _ytd_fail "Download failed."
       return 1
     fi
     return 0
   fi
 
-  # ── Mode: Audio MP3 ──
+  # ── Mode: Audio MP3 ────────────────────────────────────────────────────────
   if [[ "$mode" == "audio-mp3" ]]; then
-    echo -e "  ${_MAGENTA}♫${_R}  Downloading ${_B}audio (MP3 320kbps)${_R} → ${_GRAY}$download_dir${_R}"
-    echo ""
-
-    local start_time=$SECONDS
-    local dl_status=0
-
-    (set -o pipefail; yt-dlp \
-      "${cookie_args[@]}" \
-      --no-playlist \
-      -x --audio-format mp3 --audio-quality 0 \
-      --newline \
-      -o "$download_dir/%(title).200s.%(ext)s" \
-      "$url" 2>&1 | _ytd_progress) || dl_status=$?
-
-    if [[ $dl_status -eq 0 ]]; then
-      local elapsed=$(( SECONDS - start_time ))
-      echo ""
-      echo -e "  ${_GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${_R}"
-      echo -e "  ${_GREEN}✔${_R}  ${_B}Audio download complete${_R}  ${_GRAY}(${elapsed}s)${_R}"
-      echo -e "  ${_GRAY}   📁  $download_dir${_R}"
-      echo -e "  ${_GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${_R}"
-
-      if [[ "$notify" == true ]] && command -v osascript >/dev/null 2>&1; then
-        osascript -e "display notification \"${video_title}\" with title \"Audio Download Complete\" sound name \"Glass\""
-      fi
+    _ytd_info "Downloading ${_B}audio (MP3 320kbps)${_R} -> ${_GRAY}${download_dir}${_R}"
+    printf '\n'
+    local _t0=$SECONDS _dls=0
+    { yt-dlp "${cookie_args[@]}" --no-playlist \
+        -x --audio-format mp3 --audio-quality 0 \
+        --newline \
+        -o "${download_dir}/%(title).200s.%(ext)s" \
+        "$url" 2>&1; } | _ytd_progress || _dls=$?
+    if [[ $_dls -eq 0 ]]; then
+      local _e=$(( SECONDS - _t0 ))
+      printf '\n'; _ytd_line "$_GREEN"
+      _ytd_ok "${_B}Audio download complete${_R}  ${_GRAY}(${_e}s)${_R}"
+      _ytd_info "${_GRAY}${download_dir}${_R}"
+      _ytd_line "$_GREEN"
+      [[ "$notify" == true ]] && command -v osascript >/dev/null 2>&1 && \
+        osascript -e "display notification \"${_vtitle}\" with title \"Download Complete\" sound name \"Glass\"" 2>/dev/null || true
     else
-      echo ""
-      echo -e "  ${_RED}✖${_R}  ${_RED}Download failed.${_R}"
+      printf '\n'; _ytd_fail "Download failed."
       return 1
     fi
     return 0
   fi
 
-  # ── Mode: Audio M4A ──
+  # ── Mode: Audio M4A ────────────────────────────────────────────────────────
   if [[ "$mode" == "audio-m4a" ]]; then
-    echo -e "  ${_MAGENTA}♫${_R}  Downloading ${_B}audio (M4A/AAC)${_R} → ${_GRAY}$download_dir${_R}"
-    echo ""
-
-    local start_time=$SECONDS
-    local dl_status=0
-
-    (set -o pipefail; yt-dlp \
-      "${cookie_args[@]}" \
-      --no-playlist \
-      -x --audio-format m4a --audio-quality 0 \
-      --newline \
-      -o "$download_dir/%(title).200s.%(ext)s" \
-      "$url" 2>&1 | _ytd_progress) || dl_status=$?
-
-    if [[ $dl_status -eq 0 ]]; then
-      local elapsed=$(( SECONDS - start_time ))
-      echo ""
-      echo -e "  ${_GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${_R}"
-      echo -e "  ${_GREEN}✔${_R}  ${_B}Audio download complete${_R}  ${_GRAY}(${elapsed}s)${_R}"
-      echo -e "  ${_GRAY}   📁  $download_dir${_R}"
-      echo -e "  ${_GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${_R}"
-
-      if [[ "$notify" == true ]] && command -v osascript >/dev/null 2>&1; then
-        osascript -e "display notification \"${video_title}\" with title \"Audio Download Complete\" sound name \"Glass\""
-      fi
+    _ytd_info "Downloading ${_B}audio (M4A/AAC)${_R} -> ${_GRAY}${download_dir}${_R}"
+    printf '\n'
+    local _t0=$SECONDS _dls=0
+    { yt-dlp "${cookie_args[@]}" --no-playlist \
+        -x --audio-format m4a --audio-quality 0 \
+        --newline \
+        -o "${download_dir}/%(title).200s.%(ext)s" \
+        "$url" 2>&1; } | _ytd_progress || _dls=$?
+    if [[ $_dls -eq 0 ]]; then
+      local _e=$(( SECONDS - _t0 ))
+      printf '\n'; _ytd_line "$_GREEN"
+      _ytd_ok "${_B}Audio download complete${_R}  ${_GRAY}(${_e}s)${_R}"
+      _ytd_info "${_GRAY}${download_dir}${_R}"
+      _ytd_line "$_GREEN"
+      [[ "$notify" == true ]] && command -v osascript >/dev/null 2>&1 && \
+        osascript -e "display notification \"${_vtitle}\" with title \"Download Complete\" sound name \"Glass\"" 2>/dev/null || true
     else
-      echo ""
-      echo -e "  ${_RED}✖${_R}  ${_RED}Download failed.${_R}"
+      printf '\n'; _ytd_fail "Download failed."
       return 1
     fi
     return 0
   fi
 
-  # ── Mode: Interactive Format Picker ──
-  echo -ne "  ${_CYAN}⟳${_R}  Fetching available formats..."
+  # ── Mode: Interactive fzf picker ───────────────────────────────────────────
+  printf '  [~] Fetching available formats...'
+  local _fmts _fstatus=0
+  _fmts=$(yt-dlp "${cookie_args[@]}" --no-playlist -F "$url" 2>/dev/null) || _fstatus=$?
+  printf '\r\033[K'
 
-  local format_stdout stderr_file fetch_status
-  stderr_file=$(mktemp)
-  format_stdout=$(yt-dlp "${cookie_args[@]}" --no-playlist -F "$url" 2>"$stderr_file")
-  fetch_status=$?
-
-  echo -ne "\r\033[K"
-
-  if [[ $fetch_status -ne 0 ]]; then
-    echo -e "  ${_RED}✖${_R}  ${_RED}Could not fetch formats:${_R}"
-    echo ""
-    tail -n 6 "$stderr_file" | sed 's/^/     /'
-    rm -f "$stderr_file"
-    echo ""
-    if [[ "$use_cookies" == false ]]; then
-      echo -e "  ${_YELLOW}💡${_R}  ${_YELLOW}If this is a private or age-restricted video, retry with:${_R}"
-      echo -e "     ${_GREEN}youtube -c ${url}${_R}"
-    fi
+  if [[ $_fstatus -ne 0 || -z "$_fmts" ]]; then
+    _ytd_fail "Could not fetch formats."
+    [[ "$use_cookies" == false ]] && printf '  Tip: retry with %b-c%b for private/age-restricted videos\n' "$_GREEN" "$_R"
     return 1
   fi
 
-  rm -f "$stderr_file"
+  local _sel
+  _sel=$(printf '%s\n' "$_fmts" | fzf \
+    --tac --reverse \
+    --header="  $(printf '%s' "$_vtitle")
+  Use arrow keys to select, Enter to confirm, Esc to cancel" \
+    --prompt="  Format > " \
+    --color="fg:#cdd6f4,bg:#1e1e2e,hl:#f38ba8,fg+:#cdd6f4,bg+:#313244,hl+:#f38ba8,\
+info:#cba6f7,prompt:#a6e3a1,pointer:#f5e0dc,marker:#f5e0dc,spinner:#f5e0dc,header:#94e2d5" \
+    --border=rounded --margin=1,2 --padding=1,0) || true
 
-  local fzf_header
-  fzf_header=$(printf '%s\n%s' \
-    "  ▶ ${video_title}" \
-    "  Use ↑↓ to navigate • Enter to select • Esc to cancel")
-
-  local selected_line
-  selected_line=$(
-    echo "$format_stdout" |
-    fzf \
-      --tac \
-      --reverse \
-      --header="$fzf_header" \
-      --prompt="  Format ❯ " \
-      --pointer="▶" \
-      --marker="●" \
-      --color="fg:#cdd6f4,bg:#1e1e2e,hl:#f38ba8,fg+:#cdd6f4,bg+:#313244,hl+:#f38ba8,info:#cba6f7,prompt:#a6e3a1,pointer:#f5e0dc,marker:#f5e0dc,spinner:#f5e0dc,header:#94e2d5" \
-      --border=rounded \
-      --margin=1,2 \
-      --padding=1,0
-  )
-
-  if [[ -z "$selected_line" ]]; then
-    echo -e "  ${_YELLOW}✖${_R}  ${_YELLOW}Download cancelled.${_R}"
+  if [[ -z "$_sel" ]]; then
+    _ytd_warn "Download cancelled."
     return 0
   fi
 
-  local format_code
-  format_code=$(echo "$selected_line" | awk '{print $1}')
+  local _fmt
+  _fmt=$(printf '%s\n' "$_sel" | awk '{print $1}')
+  printf '%s\n' "$_sel" | grep -qi "video only" && _fmt="${_fmt}+bestaudio"
 
-  if echo "$selected_line" | grep -iq "video only"; then
-    echo -e "  ${_BLUE}ℹ${_R}  Video-only format — auto-merging with best audio."
-    format_code="${format_code}+bestaudio"
-  fi
+  printf '\n'
+  _ytd_info "Downloading format ${_B}${_fmt}${_R} -> ${_GRAY}${download_dir}${_R}"
+  printf '\n'
 
-  echo ""
-  echo -e "  ${_GREEN}▶${_R}  Downloading format ${_B}$format_code${_R} → ${_GRAY}$download_dir${_R}"
-  echo ""
+  local _t0=$SECONDS _dls=0
+  { yt-dlp "${cookie_args[@]}" --no-playlist \
+      -f "$_fmt" \
+      --merge-output-format "$output_format" \
+      --newline \
+      -o "${download_dir}/%(title).200s.%(ext)s" \
+      "$url" 2>&1; } | _ytd_progress || _dls=$?
 
-  local start_time=$SECONDS
-  local dl_status=0
-
-  (set -o pipefail; yt-dlp \
-    "${cookie_args[@]}" \
-    --no-playlist \
-    -f "$format_code" \
-    --merge-output-format "$output_format" \
-    --newline \
-    -o "$download_dir/%(title).200s.%(ext)s" \
-    "$url" 2>&1 | _ytd_progress) || dl_status=$?
-
-  if [[ $dl_status -eq 0 ]]; then
-    local elapsed=$(( SECONDS - start_time ))
-    echo ""
-    echo -e "  ${_GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${_R}"
-    echo -e "  ${_GREEN}✔${_R}  ${_B}Download complete${_R}  ${_GRAY}(${elapsed}s)${_R}"
-    echo -e "  ${_GRAY}   📁  $download_dir${_R}"
-    echo -e "  ${_GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${_R}"
-
-    if [[ "$notify" == true ]] && command -v osascript >/dev/null 2>&1; then
-      osascript -e "display notification \"${video_title}\" with title \"Download Complete\" sound name \"Glass\""
-    fi
+  if [[ $_dls -eq 0 ]]; then
+    local _e=$(( SECONDS - _t0 ))
+    printf '\n'; _ytd_line "$_GREEN"
+    _ytd_ok "${_B}Download complete${_R}  ${_GRAY}(${_e}s)${_R}"
+    _ytd_info "${_GRAY}${download_dir}${_R}"
+    _ytd_line "$_GREEN"
+    [[ "$notify" == true ]] && command -v osascript >/dev/null 2>&1 && \
+      osascript -e "display notification \"${_vtitle}\" with title \"Download Complete\" sound name \"Glass\"" 2>/dev/null || true
   else
-    echo ""
-    echo -e "  ${_RED}✖${_R}  ${_RED}Download failed.${_R}"
+    printf '\n'; _ytd_fail "Download failed."
     return 1
   fi
 }
 FUNC_EOF
 
-echo ""
-success "Function ${BOLD}youtube${RESET} installed into ${BOLD}$RC_FILE${RESET}"
-echo ""
-
-# ── Post-Install Summary ──────────────────────────────────────────────────────
-echo -e "${CYAN}${BOLD}  ┌─────────────────────────────────────────────────┐${RESET}"
-echo -e "${CYAN}${BOLD}  │${RESET}  ${GREEN}✔  Installation complete!${RESET}${CYAN}${BOLD}                       │${RESET}"
-echo -e "${CYAN}${BOLD}  └─────────────────────────────────────────────────┘${RESET}"
-echo ""
-echo -e "  ${BOLD}Quick Start:${RESET}"
-echo ""
-echo -e "    ${DIM}1.${RESET} Reload your shell:"
-echo -e "       ${GREEN}source $RC_FILE${RESET}"
-echo ""
-echo -e "    ${DIM}2.${RESET} Download a video (interactive picker):"
-echo -e "       ${GREEN}youtube https://youtu.be/dQw4w9WgXcQ${RESET}"
-echo ""
-echo -e "    ${DIM}3.${RESET} Quick-download best quality:"
-echo -e "       ${GREEN}youtube -b https://youtu.be/dQw4w9WgXcQ${RESET}"
-echo ""
-echo -e "    ${DIM}4.${RESET} Download audio only (MP3):"
-echo -e "       ${GREEN}youtube -a https://youtu.be/dQw4w9WgXcQ${RESET}"
-echo ""
-echo -e "    ${DIM}5.${RESET} See all options:"
-echo -e "       ${GREEN}youtube --help${RESET}"
-echo ""
+# ── Done ──────────────────────────────────────────────────────────────────────
+p ""
+success "Function ${BOLD}youtube${RESET} installed into ${BOLD}${RC_FILE}${RESET}"
+p ""
+p "${CYAN}${BOLD}  ==============================================${RESET}"
+p "${GREEN}${BOLD}     Installation complete!${RESET}"
+p "${CYAN}${BOLD}  ==============================================${RESET}"
+p ""
+p "  ${BOLD}Next steps:${RESET}"
+p ""
+p "  1. Reload your shell:"
+p "     ${GREEN}source ${RC_FILE}${RESET}"
+p ""
+p "  2. Download a video (interactive picker):"
+p "     ${GREEN}youtube https://youtu.be/dQw4w9WgXcQ${RESET}"
+p ""
+p "  3. Best quality, no picker:"
+p "     ${GREEN}youtube -b https://youtu.be/dQw4w9WgXcQ${RESET}"
+p ""
+p "  4. Audio only (MP3):"
+p "     ${GREEN}youtube -a https://youtu.be/dQw4w9WgXcQ${RESET}"
+p ""
+p "  5. See all options:"
+p "     ${GREEN}youtube --help${RESET}"
+p ""
