@@ -26,6 +26,24 @@ Run the installer directly from your terminal:
 bash <(curl -fsSL https://raw.githubusercontent.com/Anuradhapumudu/ytd/main/install-ytd.sh)
 ```
 
+### Windows (PowerShell)
+
+PowerShell does **not** support `bash <(...)`. Use this instead:
+
+```powershell
+curl.exe -fsSL https://raw.githubusercontent.com/Anuradhapumudu/ytd/main/install-ytd.sh -o $env:TEMP\ytd.sh; wsl bash $env:TEMP\ytd.sh; Remove-Item $env:TEMP\ytd.sh
+```
+
+> **Note:** This requires [WSL](https://learn.microsoft.com/en-us/windows/wsl/install) to be installed. Alternatively, open **Git Bash** or **WSL terminal** directly and run the macOS/Linux command above.
+
+### Windows (Git Bash / WSL Terminal)
+
+Open Git Bash or your WSL terminal (not PowerShell), then run:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/Anuradhapumudu/ytd/main/install-ytd.sh)
+```
+
 ### What the installer does
 
 1. Detects your OS (macOS / Linux / WSL / Windows Git Bash).
@@ -36,16 +54,17 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Anuradhapumudu/ytd/main/inst
 
 ### Platform-Specific Notes
 
-| Platform | Package Manager | Shell |
-|----------|----------------|-------|
-| macOS | Homebrew | zsh (default) or bash |
-| Ubuntu / Debian | apt | bash or zsh |
-| Fedora / RHEL | dnf / yum | bash or zsh |
-| Arch | pacman | bash or zsh |
-| Alpine | apk | bash or zsh |
-| WSL | apt / dnf (depends on distro) | bash |
-| Windows (Git Bash) | winget / scoop / choco | bash |
-| Windows (MSYS2) | winget / scoop / choco | bash |
+| Platform | Package Manager | Shell | Install From |
+|----------|----------------|-------|-------------|
+| macOS | Homebrew | zsh (default) or bash | Terminal |
+| Ubuntu / Debian | apt | bash or zsh | Terminal |
+| Fedora / RHEL | dnf / yum | bash or zsh | Terminal |
+| Arch | pacman | bash or zsh | Terminal |
+| Alpine | apk | bash or zsh | Terminal |
+| WSL | apt / dnf (depends on distro) | bash | WSL Terminal |
+| Windows (Git Bash) | winget / scoop / choco | bash | Git Bash |
+| Windows (MSYS2) | winget / scoop / choco | bash | MSYS2 |
+| Windows | winget (via WSL) | bash | PowerShell |
 
 ## Usage
 
