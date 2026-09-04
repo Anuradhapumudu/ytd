@@ -1,34 +1,51 @@
-o# YouTube Downloader CLI (Interactive)
+# YouTube Downloader CLI
 
-A polished, interactive command-line tool to download YouTube videos directly from your terminal. Built with `yt-dlp`, `ffmpeg`, and `fzf` — with **zero Keychain/password prompts** by default.
+A polished, cross-platform command-line tool to download YouTube videos directly from your terminal. Built with `yt-dlp`, `ffmpeg`, and `fzf` — works on **macOS, Linux, WSL, and Windows**.
 
-## ✨ Features
+## Features
 
-- **🔓 Cookie-Free by Default** — No more macOS Keychain password prompts. Cookies are only used when you explicitly pass `-c` for private/age-restricted videos.
-- **📋 Auto Playlist Detection** — Automatically detects playlist URLs and downloads all videos with numbered filenames into a dedicated folder. Asks for confirmation before downloading.
-- **🖥️ Multi-Platform** — Auto-installs dependencies on **macOS** (Homebrew), **Linux** (apt/dnf/yum/pacman/zypper/apk/snap), and **Windows** (winget/scoop/choco via Git Bash).
-- **🎯 Interactive Format Picker** — Beautiful `fzf`-powered format selector with a Catppuccin color theme. Navigate with arrow keys, select with Enter.
-- **⚡ Smart Presets** — Skip the picker entirely with `-b` (best quality), `-a` (audio MP3), or `-m` (audio M4A).
-- **🎬 Auto-Stitch Audio** — Selecting a high-res video-only format automatically merges it with the best available audio.
-- **📊 Video Info Card** — Shows title, channel, and duration before you pick a format.
-- **⏱️ Download Timer** — Displays elapsed time on completion.
-- **🔔 Desktop Notifications** — Optional macOS notification on download completion (`-n` flag).
-- **📁 Custom Output** — Choose your download directory (`-o`) and output format (`--mkv`).
-- **🐚 Shell Auto-Detection** — Installs to `~/.zshrc` or `~/.bashrc` depending on your default shell.
+- **Cookie-Free by Default** — No Keychain/password prompts. Cookies only used with `-c` flag.
+- **Auto Playlist Detection** — Detects playlist URLs automatically, downloads all videos with numbered filenames.
+- **Cross-Platform** — macOS (Homebrew), Linux (apt/dnf/yum/pacman/zypper/apk), WSL, Windows (winget/scoop/choco via Git Bash/MSYS2).
+- **Visual Progress Bar** — Single-line progress bar with speed, ETA, and percentage. No spammy output.
+- **Interactive Format Picker** — `fzf`-powered format selector with Catppuccin theme (optional — presets work without fzf).
+- **Smart Presets** — `-b` (best quality), `-a` (audio MP3), `-m` (audio M4A) — skip the picker entirely.
+- **Auto-Update** — Checks for new versions in the background once per 24h. Update with `youtube --update`.
+- **Auto-Stitch Audio** — Video-only formats are automatically merged with the best available audio.
+- **Video Info Card** — Shows title, channel, and duration before format selection.
+- **Download Timer** — Elapsed time shown on completion.
+- **Desktop Notifications** — Optional macOS notification on completion (`-n` flag).
+- **Custom Output** — Choose download directory (`-o`) and output format (`--mkv`).
+- **Shell Auto-Detection** — Installs to `~/.zshrc` or `~/.bashrc` depending on your shell.
 
 ## Installation
 
 Run the installer directly from your terminal:
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/Anuradhapumudu/ytd/main/install-ytd.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/Anuradhapumudu/ytd/main/install-ytd.sh)
 ```
 
-### What the installer does:
+### What the installer does
 
-1. Detects your OS and installs `yt-dlp`, `ffmpeg`, and `fzf` if missing.
-2. Detects your shell (`zsh` or `bash`) and injects the `youtube` function.
-3. Removes any previously installed version to avoid duplicates.
+1. Detects your OS (macOS / Linux / WSL / Windows Git Bash).
+2. Installs `yt-dlp`, `ffmpeg`, and `fzf` using your system's package manager.
+3. Falls back to `pip` for `yt-dlp` if the package manager doesn't have it.
+4. Detects your shell (`zsh` or `bash`) and injects the `youtube` function.
+5. Removes any previously installed version to avoid duplicates.
+
+### Platform-Specific Notes
+
+| Platform | Package Manager | Shell |
+|----------|----------------|-------|
+| macOS | Homebrew | zsh (default) or bash |
+| Ubuntu / Debian | apt | bash or zsh |
+| Fedora / RHEL | dnf / yum | bash or zsh |
+| Arch | pacman | bash or zsh |
+| Alpine | apk | bash or zsh |
+| WSL | apt / dnf (depends on distro) | bash |
+| Windows (Git Bash) | winget / scoop / choco | bash |
+| Windows (MSYS2) | winget / scoop / choco | bash |
 
 ## Usage
 
@@ -44,7 +61,7 @@ source ~/.zshrc   # or source ~/.bashrc
 youtube https://youtu.be/dQw4w9WgXcQ
 ```
 
-A beautiful format picker appears. Use **↑↓** to navigate, **Enter** to select, **Esc** to cancel.
+A format picker appears. Use arrow keys to navigate, Enter to select, Esc to cancel.
 
 ### Quick Download — Best Quality
 
@@ -106,7 +123,7 @@ youtube -c --mkv https://youtu.be/PRIVATE_ID
 Playlists are **auto-detected** from the URL — no special flags needed:
 
 ```bash
-# Auto-detected playlist → asks confirmation, downloads best quality
+# Auto-detected playlist — asks confirmation, downloads best quality
 youtube -b https://youtube.com/playlist?list=PLxxxxxxxx
 
 # Playlist with audio-only (MP3)
@@ -119,18 +136,40 @@ youtube -p -b https://youtube.com/playlist?list=PLxxxxxxxx
 youtube -b "https://youtube.com/watch?v=xxx&list=PLxxxxxxxx"
 ```
 
-Playlist files are saved as `001 - Title.mp4`, `002 - Title.mp4`, etc. inside a subfolder named after the playlist in your download directory.
+Playlist files are saved as `001 - Title.mp4`, `002 - Title.mp4`, etc. inside a subfolder named after the playlist.
+
+### Updating
+
+The script checks for updates in the background once per 24 hours. When a new version is available, you'll see a notice:
+
+```
+  [^]  Update available: v2.4  (run: youtube --update)
+```
+
+To update:
+
+```bash
+youtube --update
+```
+
+To check your current version:
+
+```bash
+youtube --version
+```
 
 ## Troubleshooting
 
 | Issue | Solution |
 |-------|----------|
-| **No audio in downloaded video** | Make sure `ffmpeg` is installed: `brew install ffmpeg` |
-| **Only 1080p available** | Update yt-dlp: `brew upgrade yt-dlp` (or equivalent) |
+| **No audio in downloaded video** | Make sure `ffmpeg` is installed |
+| **Only 1080p available** | Update yt-dlp: `pip3 install -U yt-dlp` |
 | **Private video won't download** | Use the `-c` flag: `youtube -c <url>` |
-| **Keychain prompt appears** | This only happens with `-c`. Without `-c`, cookies are never touched |
-| **Cookie extraction fails** | Fully quit Chrome/Brave (`Cmd+Q`) before retrying with `-c` |
-| **`fzf` not found** | Run the installer again, or: `brew install fzf` |
+| **Keychain prompt appears** | Only happens with `-c`. Without `-c`, cookies are never touched |
+| **Cookie extraction fails** | Fully quit Chrome/Brave before retrying with `-c` |
+| **fzf not found** | Install manually or use `-b` / `-a` / `-m` presets instead |
+| **Script fails on Windows** | Make sure you're running from Git Bash or MSYS2, not PowerShell/cmd |
+| **yt-dlp not found after install** | Close and reopen your terminal, then run `source ~/.bashrc` |
 
 ## Uninstalling
 
