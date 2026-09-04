@@ -31,7 +31,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Anuradhapumudu/ytd/main/inst
 PowerShell does **not** support `bash <(...)`. Use this instead:
 
 ```powershell
-curl.exe -fsSL https://raw.githubusercontent.com/Anuradhapumudu/ytd/main/install-ytd.sh -o $env:TEMP\ytd.sh; wsl bash $env:TEMP\ytd.sh; Remove-Item $env:TEMP\ytd.sh
+curl.exe -fsSL https://raw.githubusercontent.com/Anuradhapumudu/ytd/main/install-ytd.sh | wsl bash
 ```
 
 > **Note:** This requires [WSL](https://learn.microsoft.com/en-us/windows/wsl/install) to be installed. Alternatively, open **Git Bash** or **WSL terminal** directly and run the macOS/Linux command above.
