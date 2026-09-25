@@ -241,13 +241,12 @@ awk '
 # ── Inject the youtube() Function ────────────────────────────────────────────
 cat >> "$RC_FILE" << 'FUNC_EOF'
 
-# YouTube Download (yt-dlp) — v2.3
-# Cookie-free. Auto-detects playlists. Visual progress bar. Auto-update.
+# YouTube Download (yt-dlp) — never version
+# Cookie-free. Auto-detects playlists. Visual progress bar.
 function youtube() {
 
-  # ── Version / Update endpoint ──
-  local YTD_VERSION="2.3"
-  local YTD_RAW="https://raw.githubusercontent.com/Anuradhapumudu/ytd/main/install-ytd.sh"
+  # ── Version endpoint ──
+  local YTD_VERSION="never"
 
   # ── Portable printf wrappers ──
   local _R='\033[0m' _B='\033[1m'
@@ -327,7 +326,7 @@ function youtube() {
         printf '    %b-o%b, %b--output%b DIR Download directory (default: ~/Downloads)\n' "$_GREEN" "$_R" "$_GREEN" "$_R"
         printf '    %b--mkv%b               Output as MKV\n' "$_GREEN" "$_R"
         printf '    %b-n%b, %b--notify%b     Desktop notification on completion (macOS)\n' "$_GREEN" "$_R" "$_GREEN" "$_R"
-        printf '    %b--update%b            Update to latest version from GitHub\n' "$_GREEN" "$_R"
+        printf '    %b--update%b            Disabled in never-version mode\n' "$_GREEN" "$_R"
         printf '    %b--version%b           Show version\n' "$_GREEN" "$_R"
         printf '    %b-h%b, %b--help%b       Show this help\n\n' "$_GREEN" "$_R" "$_GREEN" "$_R"
         printf '  %bEXAMPLES%b\n' "$_B" "$_R"
@@ -350,19 +349,7 @@ function youtube() {
       --mkv)     output_format="mkv"; shift ;;
       -n|--notify) notify=true;       shift ;;
       --update)
-        printf '\n  [~] Checking for updates...\n\n'
-        local _upd_tmp
-        _upd_tmp=$(mktemp 2>/dev/null || printf '%s' "${TMPDIR:-/tmp}/ytd_update_$$.sh")
-        if curl -fsSL --max-time 30 "$YTD_RAW" -o "$_upd_tmp" 2>/dev/null \
-           && [[ -s "$_upd_tmp" ]]; then
-          bash "$_upd_tmp"
-          rm -f "$_upd_tmp" 2>/dev/null || true
-          rm -f "$HOME/.ytd_update_notice" 2>/dev/null || true
-          printf '\n  %b[OK]%b Updated! Reload your shell to apply.\n\n' "$_GREEN" "$_R"
-        else
-          rm -f "$_upd_tmp" 2>/dev/null || true
-          _ytd_fail "Update failed. Check your internet connection."
-        fi
+        _ytd_warn "Updates are disabled in never-version mode."
         return 0 ;;
       --version)
         printf '  YouTube Downloader %bv%s%b\n' "$_B" "$YTD_VERSION" "$_R"
@@ -373,34 +360,6 @@ function youtube() {
       *) url="$1"; shift ;;
     esac
   done
-
-  # ── Background auto-update check (once per 24 h) ──────────────────────────
-  (
-    local _cf="$HOME/.ytd_last_check" _nf="$HOME/.ytd_update_notice"
-    local _now _last _remote
-    _now=$(date +%s 2>/dev/null) || _now=0
-    _last=0; [[ -f "$_cf" ]] && _last=$(cat "$_cf" 2>/dev/null || echo 0)
-    if (( _now - _last > 86400 )); then
-      printf '%s' "$_now" > "$_cf" 2>/dev/null || true
-      _remote=$(curl -fsSL --max-time 5 "$YTD_RAW" 2>/dev/null \
-                | grep -m1 'YTD_VERSION=' | cut -d'"' -f2)
-      if [[ -n "$_remote" && "$_remote" != "$YTD_VERSION" ]]; then
-        printf '%s' "$_remote" > "$_nf" 2>/dev/null || true
-      else
-        rm -f "$_nf" 2>/dev/null || true
-      fi
-    fi
-  ) >/dev/null 2>&1 &
-  { disown 2>/dev/null || true; } 2>/dev/null || true
-
-  # Show pending update notice
-  if [[ -f "$HOME/.ytd_update_notice" ]]; then
-    local _nv; _nv=$(cat "$HOME/.ytd_update_notice" 2>/dev/null || true)
-    if [[ -n "$_nv" && "$_nv" != "$YTD_VERSION" ]]; then
-      printf '  %b[^]%b  Update available: v%s  (run: youtube --update)\n\n' \
-        "$_YELLOW" "$_R" "$_nv"
-    fi
-  fi
 
   # ── Validate URL ──────────────────────────────────────────────────────────
   if [[ -z "$url" ]]; then
